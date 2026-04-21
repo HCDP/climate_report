@@ -1,0 +1,13 @@
+**/*.tif
+**/*.tar.gz
+**/*.csv
+**/*.txt
+**/*.dat
+**/*.xml
+**/*.png
+**/__pycache__
+**/token.env
+**/*.keras
+envs/monthly/dev.env
+code/monthly/dependencies/*
+.DS_Store
