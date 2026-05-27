@@ -1,0 +1,494 @@
+import datetime
+import re
+import argparse
+import time
+import requests
+import os
+
+token = os.getenv("HCDP_API_ADMIN_TOKEN")
+
+headers = {
+    "Authorization": f"Bearer {token}"
+}
+
+def fetch_with_retry(url, params=None, retries=3, wait=10):
+    """GET with retry on timeout. Raises on final failure."""
+    for attempt in range(1, retries + 1):
+        try:
+            res = requests.get(url, params=params, headers=headers, timeout=30)
+            res.raise_for_status()
+            return res
+        except requests.exceptions.Timeout:
+            if attempt < retries:
+                print(f"  Timeout on attempt {attempt}/{retries} — retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
+        except requests.exceptions.RequestException:
+            raise
+
+def get_ordinal(n):
+    if 11 <= n <= 13:
+        return f"{n}th"
+    return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+def generate_rainfall_sentence(data_list, location_name, total_years):
+  if not data_list:
+      return f"{location_name} rainfall data is not yet available for this period."
+
+  record = data_list[0]
+  mean_val = record.get("mean")
+  anomaly_raw = float(record.get("anomaly", 0))
+  pchange_raw = float(record.get("pchange", 0))
+  rank_str = record.get("rank")
+  date_str = record.get("date")
+
+  dt = datetime.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+  month_name = dt.strftime("%B")
+
+  abs_anomaly = abs(anomaly_raw)
+  abs_pchange = abs(pchange_raw)
+  direction = "above" if anomaly_raw >= 0 else "below"
+
+  sentence = (
+      f"{location_name} received {mean_val} inches of rainfall — "
+      f"{abs_anomaly:.1f} inches ({abs_pchange:.1f}%) {direction} the {month_name} average"
+  )
+
+  if rank_str and str(rank_str).isdigit():
+      rank = int(rank_str)
+
+      if rank > (total_years / 2):
+          wet_rank = total_years - rank + 1
+          condition = "wettest"
+          display_rank = get_ordinal(wet_rank)
+      else:
+          condition = "driest"
+          display_rank = get_ordinal(rank)
+
+      sentence += f", ranking as the {display_rank} {condition} {month_name} in the last {total_years} years."
+  else:
+      sentence += "."
+
+  return sentence
+
+
+def generate_temperature_sentence(data_list, location_name, total_years):
+    if not data_list:
+        return f"{location_name} temperature data is not yet available for this period."
+
+    record = data_list[0]
+    mean_val = record.get("mean")
+    anomaly_raw = float(record.get("anomaly", 0))
+    rank_str = record.get("rank")
+    max_val = record.get("max")
+    date_str = record.get("date")
+
+    dt = datetime.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+    month_name = dt.strftime("%B")
+
+    abs_anomaly = abs(anomaly_raw)
+    direction = "above" if anomaly_raw >= 0 else "below"
+
+    sentence = f"{location_name} averaged {mean_val}°F"
+    if max_val is not None:
+        sentence += f" (max {max_val}°F)"
+    sentence += f" — {abs_anomaly:.1f}°F {direction} the {month_name} average"
+
+    # rank 1 = warmest (anomaly ranked descending); high rank = coolest
+    if rank_str is not None and str(rank_str).replace(".", "", 1).isdigit():
+        rank = int(float(rank_str))
+
+        if rank <= (total_years / 2):
+            condition = "warmest"
+            display_rank = get_ordinal(rank)
+        else:
+            cool_rank = total_years - rank + 1
+            condition = "coolest"
+            display_rank = get_ordinal(cool_rank)
+
+        sentence += f", ranking as the {display_rank} {condition} {month_name} in the last {total_years} years."
+    else:
+        sentence += "."
+
+    return sentence
+
+
+def generate_drought_sentence(data_list, location_name):
+    if not data_list:
+        return f"{location_name} drought data is not yet available for this period."
+
+    record = data_list[0]
+    date_str = record.get("date")
+
+    def get_pct(key):
+        val = record.get(key) or record.get(key.lower()) or record.get(key.upper())
+        return float(val) if val is not None else 0.0
+
+    d4 = get_pct("d4")
+    d3 = get_pct("d3")
+    d2 = get_pct("d2")
+    d1 = get_pct("d1")
+    d0 = get_pct("d0")
+    near_normal = get_pct("Near Normal")
+    w0 = get_pct("w0")
+    w1 = get_pct("w1")
+    w2 = get_pct("w2")
+    w3 = get_pct("w3")
+    w4 = get_pct("w4")
+
+    total_drought = d0 + d1 + d2 + d3 + d4
+    total_wet = w0 + w1 + w2 + w3 + w4
+    severe_drought = d2 + d3 + d4
+
+    try:
+        dt = datetime.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except (ValueError, TypeError):
+        try:
+            dt = datetime.datetime.strptime(date_str[:7], "%Y-%m")
+        except (ValueError, TypeError):
+            dt = None
+    month_name = dt.strftime("%B") if dt else ""
+
+    if near_normal >= 50:
+        sentence = (
+            f"In {month_name}, {location_name} was predominantly near-normal "
+            f"({near_normal:.0f}%), with {total_drought:.0f}% in drought "
+            f"and {total_wet:.0f}% wetter than normal."
+        )
+    elif total_drought >= total_wet:
+        if severe_drought >= 20:
+            sentence = (
+                f"In {month_name}, {location_name} experienced drought conditions "
+                f"affecting {total_drought:.0f}% of the area, with {severe_drought:.0f}% "
+                f"in severe to exceptional drought (D2–D4)."
+            )
+        else:
+            sentence = (
+                f"In {month_name}, {location_name} experienced drought conditions "
+                f"affecting {total_drought:.0f}% of the area."
+            )
+    else:
+        sentence = (
+            f"In {month_name}, {location_name} experienced wetter than normal conditions "
+            f"across {total_wet:.0f}% of the area."
+        )
+
+    return sentence
+
+SUBSCRIPTIONS_URL = "https://api.hcdp.ikewai.org/mesonet/climate_report/subscriptions"
+
+DATA_SOURCES = [
+    {
+        "key": "rainfall",
+        "url": "https://api.hcdp.ikewai.org/mesonet/climate_report/rainfall_stats",
+        "sentence_fn": generate_rainfall_sentence,
+        "start_year": 1920,
+        "label": "Rainfall",
+    },
+    {
+        "key": "temperature",
+        "url": "https://api.hcdp.ikewai.org/mesonet/climate_report/temperature_stats",
+        "sentence_fn": generate_temperature_sentence,
+        "start_year": 1990,
+        "label": "Temperature",
+    },
+    {
+        "key": "drought",
+        "url": "https://api.hcdp.ikewai.org/mesonet/climate_report/drought_stats",
+        "sentence_fn": generate_drought_sentence,
+        "start_year": None,
+        "label": "Drought",
+    },
+]
+
+LABELS = {s["key"]: s["label"] for s in DATA_SOURCES}
+
+# 2. Helper function to get "last month" in YYYY-MM format
+def get_last_month_str():
+    today = datetime.date.today()
+    first_day_this_month = today.replace(day=1)
+    last_month = first_day_this_month - datetime.timedelta(days=1)
+    return last_month.strftime("%Y-%m")
+
+def call_sentence_fn(source, data_list, name):
+    if source["start_year"] is not None:
+        return source["sentence_fn"](data_list, name, source["total_years"])
+    return source["sentence_fn"](data_list, name)
+
+def bold_stats(sentence):
+    sentence = re.sub(
+        r'(\d+(?:st|nd|rd|th)\s+(?:wettest|driest|warmest|coolest))',
+        r'<strong>\1</strong>',
+        sentence
+    )
+    sentence = re.sub(r'(\d+\.?\d*\s*(?:inches|°F))', r'<strong>\1</strong>', sentence)
+    sentence = re.sub(r'(\d+\.?\d*%)', r'<strong>\1</strong>', sentence)
+    return sentence
+
+def group_by_island(reports):
+    """Group reports by island, island-level entry first within each group."""
+    groups = {}
+    for report in reports:
+        island = report["query"].get("island", "")
+        if island not in groups:
+            groups[island] = []
+        groups[island].append(report)
+    for island in groups:
+        groups[island].sort(key=lambda r: (r["query"]["division_type"] != "island"))
+    return groups
+
+def render_sentences(report, html=False):
+    results = []
+    for key in ["rainfall", "temperature", "drought"]:
+        entry = report.get(key)
+        if not entry or not entry.get("summary_sentence"):
+            continue
+        sentence = entry["summary_sentence"]
+        if html:
+            results.append(
+                f"<p style='margin:4px 0;'><strong>{LABELS[key]}:</strong> {bold_stats(sentence)}</p>"
+            )
+        else:
+            results.append(f"{LABELS[key]}: {sentence}")
+    return "\n".join(results) if not html else "".join(results)
+
+def build_email_content(user_data):
+    statewide = user_data.get("statewide", {})
+    reports = user_data.get("reports", [])
+    island_groups = group_by_island(reports)
+
+    # --- Plain text ---
+    lines = [
+        "*** DEMO — This is a test run. This email was generated for testing purposes only. ***",
+        "",
+        "Hawaii Climate Report", "=" * 40, "", "STATEWIDE SUMMARY", "-" * 20
+    ]
+    for key in ["rainfall", "temperature", "drought"]:
+        sentence = statewide.get(key, "")
+        if sentence:
+            lines.append(f"{LABELS[key]}: {sentence}")
+    lines.append("")
+    lines.append("YOUR LOCATIONS")
+    lines.append("=" * 40)
+
+    for island, group in island_groups.items():
+        lines.append(f"\n{'=' * 6} {island} {'=' * 6}")
+        for report in group:
+            q = report.get("query", {})
+            div_type = q.get("division_type", "")
+            name = q.get("name", "")
+            if div_type != "island":
+                lines.append(f"\n  {name} ({div_type.capitalize()})")
+            lines.append(render_sentences(report, html=False))
+        lines.append("")
+
+    text = "\n".join(lines)
+
+    # --- HTML ---
+    statewide_html = "".join(
+        f"<p><strong>{LABELS[k]}:</strong> {bold_stats(statewide[k])}</p>"
+        for k in ["rainfall", "temperature", "drought"] if statewide.get(k)
+    )
+
+    island_blocks = ""
+    for island, group in island_groups.items():
+        entries_html = ""
+        for i, report in enumerate(group):
+            q = report.get("query", {})
+            div_type = q.get("division_type", "")
+            name = q.get("name", "")
+            border = "border-top:1px solid #c5dff0;" if i > 0 else ""
+            sentences_html = render_sentences(report, html=True)
+
+            if div_type == "island":
+                entries_html += f"""
+                <div style="padding:16px 20px;background:#f0f7fc;{border}">
+                    {sentences_html}
+                </div>"""
+            else:
+                entries_html += f"""
+                <div style="padding:16px 20px;{border}">
+                    <h4 style="margin:0 0 8px 0;color:#1a5276;font-size:15px;">
+                        {name} <span style="font-size:13px;font-weight:normal;color:#666;">({div_type.capitalize()})</span>
+                    </h4>
+                    {sentences_html}
+                </div>"""
+
+        island_blocks += f"""
+        <div style="margin-bottom:28px;border:1px solid #c5dff0;border-radius:8px;overflow:hidden;">
+            <div style="background:#1a5276;color:white;padding:12px 20px;">
+                <h3 style="margin:0;font-size:17px;">{island}</h3>
+            </div>
+            {entries_html}
+        </div>"""
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:700px;margin:auto;color:#222;">
+        <div style="padding:14px 20px;text-align:center;border-radius:6px;margin-bottom:20px;">
+            <strong style="font-size:16px;">Aloha, thank you for participating in our test run for the monthly climate summary. If you have any suggestions on how to improve this website, please let me know by emailing me at cherryle@hawaii.edu. Thank you! -Cherryle</strong>
+        </div>
+        <div style="text-align:center;margin-bottom:24px;">
+            <img src="https://www.hawaii.edu/climate-data-portal/wp-content/uploads/2022/03/cropped-HCDP_logo_crop_attempt-beta.png"
+                 alt="Hawaii Climate Data Portal"
+                 style="max-width:300px;width:100%;height:auto;" />
+        </div>
+        <h1 style="color:#1a5276;">Hawaii Climate Report</h1>
+        <div style="background:#eaf4fb;border-left:4px solid #1a5276;padding:16px 20px;margin-bottom:28px;border-radius:4px;">
+            <h2 style="margin-top:0;color:#1a5276;">Statewide Summary</h2>
+            {statewide_html}
+        </div>
+        <h2 style="color:#1a5276;">Your Locations</h2>
+        {island_blocks}
+    </div>"""
+
+    return text, html
+
+
+if __name__ == "__main__":
+    arg_parser = argparse.ArgumentParser(description="Send monthly climate report emails.")
+    arg_parser.add_argument("--email", type=str, nargs="+", default=None, help="If provided, only send to these addresses.")
+    args = arg_parser.parse_args()
+    TARGET_EMAILS = set(args.email) if args.email else None
+
+    target_date = get_last_month_str()
+    target_year = int(target_date.split("-")[0])
+    print(f"Querying data for target date: {target_date}\n" + "=" * 50)
+
+    # Compute total_years per source
+    for source in DATA_SOURCES:
+        if source["start_year"] is not None:
+            source["total_years"] = target_year - source["start_year"] + 1
+
+    # 3. Fetch statewide sentences once
+    statewide_params = {"date": target_date, "division_type": "Statewide"}
+    statewide_sentences = {}
+    statewide_ok = True
+    print("Fetching statewide summaries...")
+    for source in DATA_SOURCES:
+        try:
+            res = fetch_with_retry(source["url"], params=statewide_params)
+            data_payload = res.json()
+            data_list = data_payload if isinstance(data_payload, list) else data_payload.get("data", [])
+            if not data_list:
+                print(f"  [{source['key']}] WARNING: No statewide data returned.")
+                statewide_ok = False
+                statewide_sentences[source["key"]] = None
+            else:
+                statewide_sentences[source["key"]] = call_sentence_fn(source, data_list, "Hawaiʻi")
+                print(f"  [{source['key']}] {statewide_sentences[source['key']]}")
+        except requests.exceptions.RequestException as e:
+            print(f"  [{source['key']}] ERROR fetching statewide data: {e}")
+            statewide_ok = False
+            statewide_sentences[source["key"]] = None
+
+    if not statewide_ok:
+        print("WARNING: Some statewide data is missing. Emails will be skipped.")
+
+    # 4. Fetch subscriptions
+    print("\nFetching subscriptions...")
+    res = fetch_with_retry(SUBSCRIPTIONS_URL)
+    subscriptions = res.json()
+
+    # Islands first, then finer divisions
+    division_types = ["island", "moku", "climate", "ahupuaa", "watershed"]
+    user_reports = {}
+
+    # 5. Build a personalized report for each subscriber
+    for user in subscriptions:
+        user_id = user.get("id")
+        user_email = user.get("email")
+
+        print(f"\nProcessing User: {user_email} (ID: {user_id})")
+        print("-" * 50)
+
+        user_reports[user_id] = {
+            "email": user_email,
+            "statewide": statewide_sentences,
+            "reports": [],
+            "all_data_ok": True,
+        }
+
+        for div_type in division_types:
+            locations = user.get(div_type, [])
+
+            for loc in locations:
+                if "::" in loc:
+                    island, name = loc.split("::", 1)
+                else:
+                    island = loc
+                    name = loc
+
+                print(f"  -> {div_type.upper()} | Island: {island} | Name: {name}")
+
+                if island == "Statewide":
+                    for key, sentence in statewide_sentences.items():
+                        print(f"     [{key}] {sentence}")
+                    continue
+
+                query_params = {
+                    "date": target_date,
+                    "division_type": div_type,
+                    "island": island,
+                    "name": name,
+                }
+
+                location_report = {
+                    "query": query_params,
+                    "rainfall": None,
+                    "temperature": None,
+                    "drought": None,
+                }
+
+                for source in DATA_SOURCES:
+                    try:
+                        stats_res = fetch_with_retry(source["url"], params=query_params)
+                        data_payload = stats_res.json()
+                        data_list = data_payload if isinstance(data_payload, list) else data_payload.get("data", [])
+                        if not data_list:
+                            print(f"     [{source['key']}] No data returned for {name}")
+                            user_reports[user_id]["all_data_ok"] = False
+                        summary = call_sentence_fn(source, data_list, name)
+                        print(f"     [{source['key']}] {summary}")
+                        location_report[source["key"]] = {
+                            "status": "success",
+                            "summary_sentence": summary,
+                            "data": data_payload,
+                        }
+                    except requests.exceptions.RequestException as e:
+                        print(f"     [{source['key']}] ERROR: {e}")
+                        user_reports[user_id]["all_data_ok"] = False
+                        location_report[source["key"]] = {
+                            "status": "error",
+                            "summary_sentence": call_sentence_fn(source, [], name),
+                            "error_message": str(e),
+                        }
+
+                user_reports[user_id]["reports"].append(location_report)
+
+    # 6. Send a personalized email to each subscriber
+    print("\n" + "=" * 50)
+    if TARGET_EMAILS:
+        print(f"Sending emails... (target override: {', '.join(TARGET_EMAILS)})")
+    else:
+        print("Sending emails to all subscribers...")
+    for user_id, user_data in user_reports.items():
+        email = user_data.get("email")
+        if TARGET_EMAILS and email not in TARGET_EMAILS:
+            print(f"Skipping {email} — not in target addresses.")
+            continue
+        if not statewide_ok:
+            print(f"Skipping email to {email} — statewide data was not available.")
+            continue
+        if not user_data.get("all_data_ok", True):
+            print(f"Skipping email to {email} — one or more locations returned no data.")
+            continue
+        text_content, html_content = build_email_content(user_data)
+        body = {"text": text_content, "html": html_content}
+        url = f"https://api.hcdp.ikewai.org/mesonet/climate_report/subscription/{user_id}/email"
+        try:
+            res = requests.post(url, json=body, headers=headers)
+            res.raise_for_status()
+            print(f"Success! Email sent to {email} (ID: {user_id})")
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to send email to {email} ({user_id}): {e}")

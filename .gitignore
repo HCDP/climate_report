@@ -8,6 +8,8 @@
 **/__pycache__
 **/token.env
 **/*.keras
-envs/monthly/dev.env
+envs/dev.env
 code/monthly/dependencies/*
 .DS_Store
+output
+dependecies

@@ -17,13 +17,19 @@ fi
 echo "Aggregation date is: " $CUSTOM_DATE
 source /workspace/envs/prod.env
 
-# Fill in workflow scripts
+# Get dependencies (rainfall, temperature and spi3 maps)
+echo "[task.sh] [2/5] Get dependencies."
+python3 /workspace/code/wget_dependencies.py $CUSTOM_DATE
 
-cd /sync
-echo "[task.sh] [4/5] Uploading data."
-python3 inject_upload_config.py config.json $CUSTOM_DATE
+# Makes the categorical maps and the YTD map
+echo "[task.sh] [3/5] Get maps."
+python3 /workspace/code/get_maps.py $CUSTOM_DATE
 
-echo "[task.sh] [5/5] Uploading data."
-python3 upload.py
+# Calculates all statistics and uploads to database
+echo "[task.sh] [4/5] Calculate monthly stats and upload."
+python3 /workspace/code/monthly_upload.py $CUSTOM_DATE
+
+echo "[task.sh] [5/5] Send email."
+python3 /workspace/code/send_email.py
 
 echo "[task.sh] All done!"
