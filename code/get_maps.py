@@ -11,7 +11,7 @@ from datetime import datetime
 
 # Ensure these paths match your environment
 LOCAL_DEP_DIR = os.environ.get('DEPENDENCY_DIR', "./data/dependencies")
-TIF_DIR = "/Users/cherryleheu/Documents/HCDP/Data/"
+
 OUTPUT_DIR = os.environ.get('OUTPUT_DIR', "./public/tifs")
 
 # Ensure output directory exists
@@ -27,7 +27,7 @@ def save_raster(path, data, profile):
 def process_rainfall(year, month):
   print(f"Processing Rainfall for {year}-{month:02d}...")
   climo_file = os.path.join(LOCAL_DEP_DIR, f"climo/rainfall/rainfall_1991-2020_{month:02d}.tif")
-  raster_file = os.path.join(TIF_DIR, f"rf_all/monthly/rainfall_{year}_{month:02d}.tif")
+  raster_file = os.path.join(LOCAL_DEP_DIR, f"rainfall/rainfall_{year}_{month:02d}.tif")
 
   with rasterio.open(climo_file) as c_src, rasterio.open(raster_file) as r_src:
       rf_climo = np.ma.masked_equal(c_src.read(1), c_src.nodata)
@@ -99,7 +99,7 @@ def process_rainfall(year, month):
 
 def process_temperature(year, month):
     climo_file = os.path.join(LOCAL_DEP_DIR, f"climo/temperature/temperature_1991-2020_{month:02d}.tif")
-    raster_file = os.path.join(TIF_DIR, f"monthly/tmean/tmean_{year}_{month:02d}.tif")
+    raster_file = os.path.join(LOCAL_DEP_DIR, f"temperature/temperature_{year}_{month:02d}.tif")
 
     with rasterio.open(climo_file) as c_src, rasterio.open(raster_file) as r_src:
         t_climo = c_src.read(1).astype(float)
