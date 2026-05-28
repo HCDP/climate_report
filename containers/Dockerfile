@@ -29,6 +29,7 @@ RUN mkdir -p /workspace/envs
 RUN mkdir -p /workspace/code
 RUN mkdir -p /workspace/output
 RUN mkdir -p /workspace/dependencies
+RUN mkdir -p /sync
 
 RUN wget https://raw.githubusercontent.com/ikewai/data-uploader/main/upload.py -O /sync/upload.py
 
