@@ -12,4 +12,4 @@ envs/dev.env
 code/monthly/dependencies/*
 .DS_Store
 output
-dependecies
+dependencies

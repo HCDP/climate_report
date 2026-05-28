@@ -11,7 +11,6 @@ from datetime import datetime
 
 # Ensure these paths match your environment
 LOCAL_DEP_DIR = os.environ.get('DEPENDENCY_DIR', "./data/dependencies")
-
 OUTPUT_DIR = os.environ.get('OUTPUT_DIR', "./public/tifs")
 
 # Ensure output directory exists

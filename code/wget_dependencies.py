@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 from os.path import join
 from dateutil import parser
 
-hcdp_api_token = os.environ.get('HCDP_API_ADMIN_TOKEN')
+hcdp_api_token = os.environ.get('HCDP_API_TOKEN')
 local_dep_dir = os.environ.get('DEPENDENCY_DIR') 
 
 datasets = [

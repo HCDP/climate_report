@@ -17,7 +17,7 @@ import pytz
 
 warnings.filterwarnings('ignore')
 
-hcdp_api_token = os.environ.get('HCDP_API_ADMIN_TOKEN')
+hcdp_api_token = os.environ.get('HCDP_API_TOKEN')
 local_dep_dir = os.environ.get('DEPENDENCY_DIR') 
 local_output_dir = os.environ.get('OUTPUT_DIR') 
 

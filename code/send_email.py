@@ -5,7 +5,7 @@ import time
 import requests
 import os
 
-token = os.getenv("HCDP_API_ADMIN_TOKEN")
+token = os.getenv("HCDP_API_TOKEN")
 
 headers = {
     "Authorization": f"Bearer {token}"
@@ -349,7 +349,14 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Send monthly climate report emails.")
     arg_parser.add_argument("--email", type=str, nargs="+", default=None, help="If provided, only send to these addresses.")
     args = arg_parser.parse_args()
-    TARGET_EMAILS = set(args.email) if args.email else None
+    TARGET_EMAILS = args.email
+    if TARGET_EMAILS is None:
+        email_env = os.getenv("TARGET_EMAILS")
+        if email_env is not None:
+            email_env = set([value.strip() for value in email_env.split(",")])
+        TARGET_EMAILS = email_env
+    else:
+        TARGET_EMAILS = set(TARGET_EMAILS)
 
     target_date = get_last_month_str()
     target_year = int(target_date.split("-")[0])
@@ -468,7 +475,7 @@ if __name__ == "__main__":
 
     # 6. Send a personalized email to each subscriber
     print("\n" + "=" * 50)
-    if TARGET_EMAILS:
+    if TARGET_EMAILS is not None:
         print(f"Sending emails... (target override: {', '.join(TARGET_EMAILS)})")
     else:
         print("Sending emails to all subscribers...")
