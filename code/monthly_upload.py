@@ -399,7 +399,7 @@ if __name__ == '__main__':
         '--date',
         type=str,
         default=None,
-        help="Target date in YYYY-MM format (e.g., '2026-03'). Defaults to last month."
+        help="Target date in ISO 8601 format (e.g., '2026-03'). Defaults to last month."
     )
 
     args = arg_parser.parse_args()

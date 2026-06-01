@@ -27,7 +27,7 @@ python3 /workspace/code/get_maps.py $CUSTOM_DATE
 
 # Calculates all statistics and uploads to database
 echo "[task.sh] [4/7] Calculate monthly stats and upload."
-python3 /workspace/code/monthly_upload.py $CUSTOM_DATE
+python3 /workspace/code/monthly_upload.py --date $CUSTOM_DATE
 
 echo "[task.sh] [5/7] Send email."
 python3 /workspace/code/send_email.py
