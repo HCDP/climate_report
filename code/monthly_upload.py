@@ -44,6 +44,31 @@ DROUGHT_COLS = [
 # ---------------------------------------------------------
 CHUNK_SIZE = 500
 
+def fetch_existing_ytd(division_type, target_month):
+    """Fetch existing ytd_pnormal from the API for all records of a given division_type and month.
+    Returns a dict keyed by (island, name, date_str) -> ytd_pnormal."""
+    url = "https://api.hcdp.ikewai.org/mesonet/climate_report/rainfall_stats"
+    params = {"division_type": division_type}
+    try:
+        response = requests.get(url, params=params, headers=HEADERS, timeout=60)
+        records = response.json()
+    except Exception as e:
+        print(f"Warning: could not fetch existing ytd values: {e}")
+        return {}
+
+    lookup = {}
+    for r in records:
+        date_raw = r.get("date", "")
+        # API returns "1920-05-01T00:00:00.000Z", normalise to "1920-05"
+        date_str = date_raw[:7] if date_raw else ""
+        if int(date_str[5:7]) != target_month:
+            continue
+        key = (r.get("island"), r.get("name"), date_str)
+        ytd = r.get("ytd_pnormal")
+        lookup[key] = int(ytd) if ytd is not None else None
+    return lookup
+
+
 def upload_chunks(url, records, use_json=True, timeout=60):
     """POST records in chunks. Returns (statuses, all_ok)."""
     statuses = []
@@ -125,7 +150,7 @@ def precalculate_climatology(gdf, dataset_type, target_month, is_statewide=False
                 climo_cache[target_month] = convert_units(np.nanmean(arr), dataset_type)
         
         if dataset_type == "rainfall":
-            climo_ytd_path = os.path.join("climo", "rainfall_ytd", f"YTD_rain_month_{target_month:02d}.tif")
+            climo_ytd_path = os.path.join(local_dep_dir, "climo", "rainfall_ytd", f"YTD_rain_month_{target_month:02d}.tif")
             if os.path.exists(climo_ytd_path):
                 with rasterio.open(climo_ytd_path) as src:
                     ytd_arr = src.read(1).astype(float)
@@ -153,7 +178,7 @@ def precalculate_climatology(gdf, dataset_type, target_month, is_statewide=False
         climo_cache[target_month] = [np.nan] * len(gdf)
         
     if dataset_type == "rainfall":
-        climo_ytd_path = os.path.join("climo", "rainfall_ytd", f"YTD_rain_month_{target_month:02d}.tif")
+        climo_ytd_path = os.path.join(local_dep_dir, "climo", "rainfall_ytd", f"YTD_rain_month_{target_month:02d}.tif")
         if os.path.exists(climo_ytd_path):
             ytd_zs = zonal_stats(vectors=gdf, raster=climo_ytd_path, stats=["mean"], nodata=-9999)
             climo_ytd_cache[target_month] = [c['mean'] if c['mean'] is not None else np.nan for c in ytd_zs]
@@ -300,19 +325,44 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
 
     # Build payload
     base_cols = ["island", "division_type", "name", "date", "mean", "anomaly", "pchange", "rank"]
-    if dataset_type == "rainfall":
-        base_cols.append("ytd_pnormal")
-    elif dataset_type == "temperature":
+    if dataset_type == "temperature":
         base_cols.append("max")
 
-    final_data = []
-    for _, row in df[base_cols].iterrows():
-        row_list = [None if (isinstance(x, float) and np.isnan(x)) else (x.item() if hasattr(x, 'item') else x) for x in row]
-        final_data.append(row_list)
+    def to_row(row, cols):
+        return [None if (isinstance(x, float) and np.isnan(x)) else (x.item() if hasattr(x, 'item') else x) for x in row[cols]]
 
-    n_chunks = max(1, (len(final_data) + CHUNK_SIZE - 1) // CHUNK_SIZE)
-    print(f"Uploading {len(final_data)} records for Month {target_month:02d} in {n_chunks} chunk(s)...")
-    statuses, all_ok = upload_chunks(url, final_data)
+    if dataset_type == "rainfall":
+        ytd_cols = base_cols + ["ytd_pnormal"]
+
+        # Fetch existing ytd_pnormal for historical years so we don't clobber backfilled values
+        division_type = df["division_type"].iloc[0]
+        print(f"Fetching existing ytd_pnormal for {division_type}...")
+        ytd_lookup = fetch_existing_ytd(division_type, target_month)
+
+        hist_mask = df["year"] != target_year
+
+        def hist_row(row):
+            key = (row["island"], row["name"], row["date"])
+            row = row.copy()
+            row["ytd_pnormal"] = ytd_lookup.get(key, None)
+            return to_row(row, ytd_cols)
+
+        hist_data   = [hist_row(row) for _, row in df[hist_mask].iterrows()]
+        target_data = [to_row(row, ytd_cols) for _, row in df[~hist_mask].iterrows()]
+
+        n_hist   = max(1, (len(hist_data)   + CHUNK_SIZE - 1) // CHUNK_SIZE)
+        n_target = max(1, (len(target_data) + CHUNK_SIZE - 1) // CHUNK_SIZE)
+        print(f"Uploading {len(hist_data)} historical records in {n_hist} chunk(s)...")
+        statuses_hist, ok_hist = upload_chunks(url, hist_data)
+        print(f"Uploading {len(target_data)} target-year records in {n_target} chunk(s)...")
+        statuses_target, ok_target = upload_chunks(url, target_data)
+        statuses, all_ok = statuses_hist + statuses_target, ok_hist and ok_target
+    else:
+        final_data = [to_row(row, base_cols) for _, row in df.iterrows()]
+        n_chunks = max(1, (len(final_data) + CHUNK_SIZE - 1) // CHUNK_SIZE)
+        print(f"Uploading {len(final_data)} records for Month {target_month:02d} in {n_chunks} chunk(s)...")
+        statuses, all_ok = upload_chunks(url, final_data)
+
     upload_status.append(f"Month {target_month:02d}: {statuses}")
     return "\n".join(upload_status), all_ok
 

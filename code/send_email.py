@@ -58,13 +58,14 @@ def generate_rainfall_sentence(data_list, location_name, total_years):
   if rank_str and str(rank_str).isdigit():
       rank = int(rank_str)
 
-      if rank > (total_years / 2):
-          wet_rank = total_years - rank + 1
+      # rank 1 = wettest (anomaly ranked descending); high rank = driest
+      if rank <= (total_years / 2):
           condition = "wettest"
-          display_rank = get_ordinal(wet_rank)
-      else:
-          condition = "driest"
           display_rank = get_ordinal(rank)
+      else:
+          dry_rank = total_years - rank + 1
+          condition = "driest"
+          display_rank = get_ordinal(dry_rank)
 
       sentence += f", ranking as the {display_rank} {condition} {month_name} in the last {total_years} years."
   else:
