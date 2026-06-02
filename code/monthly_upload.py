@@ -44,6 +44,16 @@ DROUGHT_COLS = [
 # ---------------------------------------------------------
 CHUNK_SIZE = 500
 
+ISLAND_OKINA_MAP = {
+    "Hawaii": "Hawaiʻi",   "Hawai'i": "Hawaiʻi",
+    "Oahu":   "Oʻahu",     "O'ahu":   "Oʻahu",
+    "Kauai":  "Kauaʻi",    "Kaua'i":  "Kauaʻi",
+    "Molokai":"Molokaʻi",  "Moloka'i":"Molokaʻi",
+    "Lanai":  "Lānaʻi",    "Lana'i":  "Lānaʻi",
+    "Niihau": "Niʻihau",   "Ni'ihau": "Niʻihau",
+    "Kahoolawe": "Kahoʻolawe", "Kaho'olawe": "Kahoʻolawe",
+}
+
 def fetch_existing_ytd(division_type, target_month):
     """Fetch existing ytd_pnormal from the API for all records of a given division_type and month.
     Returns a dict keyed by (island, name, date_str) -> ytd_pnormal."""
@@ -82,7 +92,6 @@ def upload_chunks(url, records, use_json=True, timeout=60):
                 else:
                     response = requests.post(url, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers=HEADERS, timeout=timeout)
                 statuses.append(response.status_code)
-                print(f"  Chunk {i//CHUNK_SIZE + 1} response: {response.text[:300]}")
                 break
             except requests.exceptions.Timeout:
                 if attempt == 2:
@@ -114,11 +123,12 @@ def load_and_prep_shapefile(division):
     island_col = next((c for c in gdf.columns if c.lower() in ["island", "mokupuni", "isle", "islandname"]), None)
     name_col = next((c for c in gdf.columns if c.lower() in ["name", "division", "moku", "climate_div", "ahupuaa", "county", "name_hwn"]), None)
 
-    okina_regex = u"['`ʻ‘’＇]"
+    okina_regex = u"[‘`ʻ’’＇]"
     if island_col:
-        gdf[island_col] = gdf[island_col].replace(okina_regex, "ʻ", regex=True)
+        # Apply explicit island name map first (handles macrons like Lānaʻi), then catch any remaining rogue apostrophes
+        gdf[island_col] = gdf[island_col].replace(ISLAND_OKINA_MAP).astype(str).str.replace(okina_regex, "ʻ", regex=True)
     if name_col:
-        gdf[name_col] = gdf[name_col].replace(okina_regex, "ʻ", regex=True)
+        gdf[name_col] = gdf[name_col].replace(ISLAND_OKINA_MAP).astype(str).str.replace(okina_regex, "ʻ", regex=True)
 
     gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
 
@@ -279,7 +289,6 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
                 all_records.append(record)
 
     # 2. RANK ONCE
-    print("Calculating ranks...")
     df = pd.DataFrame(all_records)
     if df.empty:
         return f"Month {target_month:02d}: No historical data found.", False
@@ -375,6 +384,18 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
         n_chunks = max(1, (len(final_data) + CHUNK_SIZE - 1) // CHUNK_SIZE)
         print(f"Uploading {len(final_data)} records for Month {target_month:02d} in {n_chunks} chunk(s)...")
         statuses, all_ok = upload_chunks(url, final_data)
+
+    # Upload target month to {dataset_type}_historical: [island, division_type, name, date, value]
+    historical_url = f"https://api.hcdp.ikewai.org/mesonet/climate_report/{dataset_type}_historical"
+    target_df = df[df["year"] == target_year]
+    historical_data = [
+        [row["island"], row["division_type"], row["name"], row["date"],
+         None if (isinstance(row["mean"], float) and np.isnan(row["mean"])) else row["mean"]]
+        for _, row in target_df.iterrows()
+    ]
+    print(f"Uploading {len(historical_data)} records to {dataset_type}_historical...")
+    statuses_h, ok_h = upload_chunks(historical_url, historical_data)
+    statuses, all_ok = statuses + statuses_h, all_ok and ok_h
 
     upload_status.append(f"Month {target_month:02d}: {statuses}")
     return "\n".join(upload_status), all_ok
