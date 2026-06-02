@@ -59,9 +59,9 @@ def fetch_existing_ytd(division_type, target_month):
     lookup = {}
     for r in records:
         date_raw = r.get("date", "")
-        # API returns "1920-05-01T00:00:00.000Z", normalise to "1920-05"
-        date_str = date_raw[:7] if date_raw else ""
-        if int(date_str[5:7]) != target_month:
+        # API returns "1920-05-01T00:00:00.000Z", normalise to "1920-05-01"
+        date_str = date_raw[:10] if date_raw else ""
+        if not date_str or int(date_str[5:7]) != target_month:
             continue
         key = (r.get("island"), r.get("name"), date_str)
         ytd = r.get("ytd_pnormal")
@@ -82,6 +82,7 @@ def upload_chunks(url, records, use_json=True, timeout=60):
                 else:
                     response = requests.post(url, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers=HEADERS, timeout=timeout)
                 statuses.append(response.status_code)
+                print(f"  Chunk {i//CHUNK_SIZE + 1} response: {response.text[:300]}")
                 break
             except requests.exceptions.Timeout:
                 if attempt == 2:
@@ -113,7 +114,7 @@ def load_and_prep_shapefile(division):
     island_col = next((c for c in gdf.columns if c.lower() in ["island", "mokupuni", "isle", "islandname"]), None)
     name_col = next((c for c in gdf.columns if c.lower() in ["name", "division", "moku", "climate_div", "ahupuaa", "county", "name_hwn"]), None)
 
-    okina_regex = r"['`'']"
+    okina_regex = u"['`ʻ‘’＇]"
     if island_col:
         gdf[island_col] = gdf[island_col].replace(okina_regex, "ʻ", regex=True)
     if name_col:
@@ -206,7 +207,7 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
     for tif in sorted(glob.glob(os.path.join(tif_path, f"{var}_*_{target_month:02d}.tif"))):
         parts = os.path.basename(tif).replace(".tif", "").split("_")
         curr_year, curr_month = int(parts[1]), parts[2]
-        curr_date = f"{curr_year}-{curr_month}"
+        curr_date = f"{curr_year}-{curr_month}-01"
 
         # --- STATEWIDE BRANCH ---
         if is_statewide:
@@ -329,7 +330,15 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
         base_cols.append("max")
 
     def to_row(row, cols):
-        return [None if (isinstance(x, float) and np.isnan(x)) else (x.item() if hasattr(x, 'item') else x) for x in row[cols]]
+        vals = []
+        for col, x in zip(cols, row[cols]):
+            if isinstance(x, float) and np.isnan(x):
+                vals.append(None)
+            elif col == "rank" and x is not None:
+                vals.append(int(x))
+            else:
+                vals.append(x.item() if hasattr(x, 'item') else x)
+        return vals
 
     if dataset_type == "rainfall":
         ytd_cols = base_cols + ["ytd_pnormal"]
@@ -338,6 +347,9 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
         division_type = df["division_type"].iloc[0]
         print(f"Fetching existing ytd_pnormal for {division_type}...")
         ytd_lookup = fetch_existing_ytd(division_type, target_month)
+        if not ytd_lookup:
+            print(f"Warning: ytd_lookup is empty — skipping historical upload to avoid overwriting backfilled ytd_pnormal values.")
+            hist_data = []
 
         hist_mask = df["year"] != target_year
 
@@ -355,6 +367,7 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
         print(f"Uploading {len(hist_data)} historical records in {n_hist} chunk(s)...")
         statuses_hist, ok_hist = upload_chunks(url, hist_data)
         print(f"Uploading {len(target_data)} target-year records in {n_target} chunk(s)...")
+        print(f"  Sample target record: {target_data[0] if target_data else 'EMPTY'}")
         statuses_target, ok_target = upload_chunks(url, target_data)
         statuses, all_ok = statuses_hist + statuses_target, ok_hist and ok_target
     else:
