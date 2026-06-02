@@ -4,13 +4,6 @@
 	"processes": 1,
 	"print_exec_stats": true,
 	"write_exec_stats": "stats.json",
-	"agave_options": {
-		"api_server": "https://ikeauth.its.hawaii.edu",
-		"username": "username",
-		"password": "password",
-		"api_key": "api_key",
-		"api_secret": "api_secret"
-	},
 	"upload": 
 	[
 		{
