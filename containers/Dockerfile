@@ -20,7 +20,7 @@ RUN python3 -m pip install matplotlib
 
 RUN mkdir -p /workspace
 WORKDIR /workspace
-RUN wget -nv https://api.hcdp.ikewai.org/files/download/workflow_data/climate_report/dependencies.tar.gz
+RUN wget -4 -nv https://api.hcdp.ikewai.org/files/download/workflow_data/climate_report/dependencies.tar.gz
 RUN tar -xf dependencies.tar.gz
 RUN rm dependencies.tar.gz
 
