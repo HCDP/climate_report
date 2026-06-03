@@ -7,8 +7,20 @@
 	"upload": 
 	[
 		{
-			"local_path": "/workspace/output",
-			"remote_path": "HCDP/climate_report_data/%y/%m"
+			"local_path": "/workspace/output/temperature_diff_cat_%y_%m.tif",
+			"remote_path": "HCDP/climate_report_data/climate_summary_tifs/temperature"
+		},
+		{
+			"local_path": "/workspace/output/spi3_cat_%y_%m.tif",
+			"remote_path": "HCDP/climate_report_data/climate_summary_tifs/spi3"
+		},
+		{
+			"local_path": "/workspace/output/rainfall_pdiff_cat_%y_%m.tif",
+			"remote_path": "HCDP/climate_report_data/climate_summary_tifs/rainfall"
+		},
+		{
+			"local_path": "/workspace/output/rainfall_legend_%y_%m.json",
+			"remote_path": "HCDP/climate_report_data/climate_summary_tifs/rainfall/legend"
 		}
 	]
 }
