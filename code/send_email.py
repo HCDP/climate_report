@@ -46,13 +46,13 @@ def generate_rainfall_sentence(data_list, location_name, total_years):
   dt = datetime.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
   month_name = dt.strftime("%B")
 
+  sign = "+" if anomaly_raw >= 0 else "-"
   abs_anomaly = abs(anomaly_raw)
   abs_pchange = abs(pchange_raw)
-  direction = "above" if anomaly_raw >= 0 else "below"
 
   sentence = (
-      f"{location_name} received {mean_val} inches of rainfall — "
-      f"{abs_anomaly:.1f} inches ({abs_pchange:.1f}%) {direction} the {month_name} average"
+      f"{location_name} received {float(mean_val):.1f} inches of rainfall; "
+      f"{sign}{abs_anomaly:.1f} inches ({sign}{abs_pchange:.1f}%) from the {month_name} average"
   )
 
   if rank_str and str(rank_str).isdigit():
@@ -88,13 +88,13 @@ def generate_temperature_sentence(data_list, location_name, total_years):
     dt = datetime.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
     month_name = dt.strftime("%B")
 
+    sign = "+" if anomaly_raw >= 0 else "-"
     abs_anomaly = abs(anomaly_raw)
-    direction = "above" if anomaly_raw >= 0 else "below"
 
-    sentence = f"{location_name} averaged {mean_val}°F"
+    sentence = f"{location_name} averaged {float(mean_val):.1f}°F"
     if max_val is not None:
-        sentence += f" (max {max_val}°F)"
-    sentence += f" — {abs_anomaly:.1f}°F {direction} the {month_name} average"
+        sentence += f" (max {float(max_val):.1f}°F)"
+    sentence += f"; {sign}{abs_anomaly:.1f}°F from the {month_name} average"
 
     # rank 1 = warmest (anomaly ranked descending); high rank = coolest
     if rank_str is not None and str(rank_str).replace(".", "", 1).isdigit():
@@ -138,7 +138,7 @@ def generate_drought_sentence(data_list, location_name):
     w3 = get_pct("w3")
     w4 = get_pct("w4")
 
-    total_drought = d0 + d1 + d2 + d3 + d4
+    total_drought = d1 + d2 + d3 + d4
     total_wet = w0 + w1 + w2 + w3 + w4
     severe_drought = d2 + d3 + d4
 
@@ -153,25 +153,25 @@ def generate_drought_sentence(data_list, location_name):
 
     if near_normal >= 50:
         sentence = (
-            f"In {month_name}, {location_name} was predominantly near-normal "
+            f"{location_name} was predominantly near-normal "
             f"({near_normal:.0f}%), with {total_drought:.0f}% in drought "
             f"and {total_wet:.0f}% wetter than normal."
         )
     elif total_drought >= total_wet:
         if severe_drought >= 20:
             sentence = (
-                f"In {month_name}, {location_name} experienced drought conditions "
+                f"{location_name} experienced drought conditions "
                 f"affecting {total_drought:.0f}% of the area, with {severe_drought:.0f}% "
                 f"in severe to exceptional drought (D2–D4)."
             )
         else:
             sentence = (
-                f"In {month_name}, {location_name} experienced drought conditions "
+                f"{location_name} experienced drought conditions "
                 f"affecting {total_drought:.0f}% of the area."
             )
     else:
         sentence = (
-            f"In {month_name}, {location_name} experienced wetter than normal conditions "
+            f"{location_name} experienced wetter than normal conditions "
             f"across {total_wet:.0f}% of the area."
         )
 
@@ -254,7 +254,13 @@ def render_sentences(report, html=False):
             results.append(f"{LABELS[key]}: {sentence}")
     return "\n".join(results) if not html else "".join(results)
 
-def build_email_content(user_data):
+def display_island(island):
+    return "Hawaiʻi Island" if island in ("Hawaii", "Hawaiʻi") else island
+
+def display_div_type(div_type):
+    return {"ahupuaa": "Ahupuaʻa"}.get(div_type, div_type.capitalize())
+
+def build_email_content(user_data, target_date=None):
     statewide = user_data.get("statewide", {})
     reports = user_data.get("reports", [])
     island_groups = group_by_island(reports)
@@ -274,13 +280,15 @@ def build_email_content(user_data):
     lines.append("=" * 40)
 
     for island, group in island_groups.items():
-        lines.append(f"\n{'=' * 6} {island} {'=' * 6}")
+        lines.append(f"\n{'=' * 6} {display_island(island)} {'=' * 6}")
         for report in group:
             q = report.get("query", {})
             div_type = q.get("division_type", "")
             name = q.get("name", "")
-            if div_type != "island":
-                lines.append(f"\n  {name} ({div_type.capitalize()})")
+            if div_type == "island":
+                lines.append("\n  Island statistics")
+            else:
+                lines.append(f"\n  {name} ({display_div_type(div_type)})")
             lines.append(render_sentences(report, html=False))
         lines.append("")
 
@@ -305,13 +313,16 @@ def build_email_content(user_data):
             if div_type == "island":
                 entries_html += f"""
                 <div style="padding:16px 20px;background:#f0f7fc;{border}">
+                    <h4 style="margin:0 0 8px 0;color:#1a5276;font-size:15px;">
+                        Island-wide
+                    </h4>
                     {sentences_html}
                 </div>"""
             else:
                 entries_html += f"""
                 <div style="padding:16px 20px;{border}">
                     <h4 style="margin:0 0 8px 0;color:#1a5276;font-size:15px;">
-                        {name} <span style="font-size:13px;font-weight:normal;color:#666;">({div_type.capitalize()})</span>
+                        {name} <span style="font-size:13px;font-weight:normal;color:#666;">({display_div_type(div_type)})</span>
                     </h4>
                     {sentences_html}
                 </div>"""
@@ -319,7 +330,7 @@ def build_email_content(user_data):
         island_blocks += f"""
         <div style="margin-bottom:28px;border:1px solid #c5dff0;border-radius:8px;overflow:hidden;">
             <div style="background:#1a5276;color:white;padding:12px 20px;">
-                <h3 style="margin:0;font-size:17px;">{island}</h3>
+                <h3 style="margin:0;font-size:17px;">{display_island(island)}</h3>
             </div>
             {entries_html}
         </div>"""
@@ -334,13 +345,20 @@ def build_email_content(user_data):
                  alt="Hawaii Climate Data Portal"
                  style="max-width:300px;width:100%;height:auto;" />
         </div>
-        <h1 style="color:#1a5276;">Hawaii Climate Report</h1>
+        <h1 style="color:#1a5276;">Hawaiʻi Climate Summary &#8212; {f'{datetime.datetime.strptime(target_date, "%Y-%m").strftime("%B %Y")}' if target_date else ''}</h1>
         <div style="background:#eaf4fb;border-left:4px solid #1a5276;padding:16px 20px;margin-bottom:28px;border-radius:4px;">
             <h2 style="margin-top:0;color:#1a5276;">Statewide Summary</h2>
             {statewide_html}
         </div>
         <h2 style="color:#1a5276;">Your Locations</h2>
         {island_blocks}
+        <div style="margin-top:32px;padding:20px;background:#f0f7fc;border-radius:8px;text-align:center;border:1px solid #c5dff0;">
+            <p style="margin:0 0 10px 0;font-size:15px;">Want to explore more data or add locations to your summary?</p>
+            <a href="https://www.hawaii.edu/climate-data-portal/climate-summary/"
+               style="display:inline-block;background:#1a5276;color:white;padding:10px 24px;border-radius:6px;text-decoration:none;font-size:15px;font-weight:bold;">
+                Visit the Hawaiʻi Climate Summary Page
+            </a>
+        </div>
     </div>"""
 
     return text, html
@@ -406,6 +424,10 @@ if __name__ == "__main__":
     for user in subscriptions:
         user_id = user.get("id")
         user_email = user.get("email")
+
+        if TARGET_EMAILS and user_email not in TARGET_EMAILS:
+            print(f"\nSkipping {user_email} — not in target addresses.")
+            continue
 
         print(f"\nProcessing User: {user_email} (ID: {user_id})")
         print("-" * 50)
@@ -491,7 +513,7 @@ if __name__ == "__main__":
         if not user_data.get("all_data_ok", True):
             print(f"Skipping email to {email} — one or more locations returned no data.")
             continue
-        text_content, html_content = build_email_content(user_data)
+        text_content, html_content = build_email_content(user_data, target_date)
         body = {"text": text_content, "html": html_content}
         url = f"https://api.hcdp.ikewai.org/mesonet/climate_report/subscription/{user_id}/email"
         try:
