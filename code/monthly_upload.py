@@ -123,7 +123,7 @@ def load_and_prep_shapefile(division):
     island_col = next((c for c in gdf.columns if c.lower() in ["island", "mokupuni", "isle", "islandname"]), None)
     name_col = next((c for c in gdf.columns if c.lower() in ["name", "division", "moku", "climate_div", "ahupuaa", "county", "name_hwn"]), None)
 
-    okina_regex = u"[‘`ʻ’’＇]"
+    okina_regex = u"['‘’`ʻʼ＇]"
     if island_col:
         # Apply explicit island name map first (handles macrons like Lānaʻi), then catch any remaining rogue apostrophes
         gdf[island_col] = gdf[island_col].replace(ISLAND_OKINA_MAP).astype(str).str.replace(okina_regex, "ʻ", regex=True)
@@ -183,6 +183,7 @@ def precalculate_climatology(gdf, dataset_type, target_month, is_statewide=False
     if os.path.exists(climo_file):
         gdf = gdf[gdf.geometry.notna()]
         gdf = gdf[~gdf.geometry.is_empty]
+        gdf = gdf.reset_index(drop=True)
         climo_zs = zonal_stats(vectors=gdf, raster=climo_file, stats=["mean"], nodata=None)
         climo_cache[target_month] = [convert_units(c["mean"], dataset_type) if c["mean"] is not None else np.nan for c in climo_zs]
     else:
@@ -258,7 +259,7 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
             stats = zonal_stats(vectors=gdf, raster=tif, stats=stats_to_compute, nodata=None)
 
             for idx, row in gdf.iterrows():
-                mean_raw = stats[idx]["mean"]
+                mean_raw = stats[idx]["mean"]  # safe: gdf index is reset_index'd before this loop
                 if mean_raw is None or np.isnan(mean_raw):
                     mean_val, anomaly, pchange = np.nan, np.nan, np.nan
                     if dataset_type == "temperature":
