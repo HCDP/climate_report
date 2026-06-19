@@ -145,7 +145,9 @@ def load_and_prep_shapefile(division):
         gdf = gdf.dissolve(by=name_col, as_index=False)
         gdf["name_clean"] = gdf[name_col]
         gdf["island_clean"] = gdf[name_col] if division == "island" else "Statewide"
-
+    print(gdf[gdf.geometry.isna() | gdf.geometry.is_empty])
+    gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
+    
     gdf["division_type"] = division
     return gdf
 
