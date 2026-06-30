@@ -334,9 +334,6 @@ def build_email_content(user_data, target_date=None):
 
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:700px;margin:auto;color:#222;">
-        <div style="padding:14px 20px;text-align:center;border-radius:6px;margin-bottom:20px;">
-            <strong style="font-size:16px;">Aloha, thank you for participating in our beta test for the Monthly Climate Summary. If you have any feedback on how to improve the user experience for this tool, please let me know by emailing me at cherryle@hawaii.edu. We hope to incorporate all feedback and officially launch this app on July 1. Thank you! -Cherryle</strong>
-        </div>
         <div style="text-align:center;margin-bottom:24px;">
             <img src="https://www.hawaii.edu/climate-data-portal/wp-content/uploads/2022/03/cropped-HCDP_logo_crop_attempt-beta.png"
                  alt="Hawaii Climate Data Portal"
