@@ -264,8 +264,6 @@ def build_email_content(user_data, target_date=None):
 
     # --- Plain text ---
     lines = [
-        "*** DEMO — This is a test run. This email was generated for testing purposes only. ***",
-        "",
         "Hawaii Climate Report", "=" * 40, "", "STATEWIDE SUMMARY", "-" * 20
     ]
     for key in ["rainfall", "temperature", "drought"]:

@@ -409,7 +409,7 @@ def process_and_upload_last_month(target_year, target_month, gdf, climo_cache, c
 def process_drought_month(year, month, division, gdf):
     tif_path = os.path.join(DROUGHT_TIF_DIR, f"spi3_cat_{year}_{month:02d}.tif")
     if not os.path.exists(tif_path):
-        return f"Error: TIF not found at {tif_path}"
+        return f"Error: TIF not found at {tif_path}", False
 
     date_str = f"{year}-{month:02d}"
     print(f"Processing drought data for {date_str}...")
@@ -508,11 +508,11 @@ if __name__ == '__main__':
     print(f"Starting run for {TARGET_YEAR}-{TARGET_MONTH:02d}")
     print(f"Datasets: {datasets_to_run} | Divisions: {divisions_to_run}")
 
+    any_failed = False
+
     for division in divisions_to_run:
         is_statewide = (division == "statewide")
         base_gdf = None if is_statewide else load_and_prep_shapefile(division)
-
-        any_failed = False
 
         for dataset in datasets_to_run:
             print(f"\n--- {dataset.upper()} / {division.upper()} ---")

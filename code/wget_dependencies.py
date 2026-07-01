@@ -103,7 +103,7 @@ if __name__ == "__main__":
       month=month_value
   )
 
-  fetch_tifs(
+  spi3_ok = fetch_tifs(
       dataset_prefix="spi3",
       dataset_dict=datasets[3][0],
       start_year=year_value,
@@ -116,5 +116,8 @@ if __name__ == "__main__":
       sys.exit(1)
   if not temperature_ok:
       print(f"ERROR: No 200 response for temperature {year_value}-{month_value:02d}. Stopping.")
+      sys.exit(1)
+  if not spi3_ok:
+      print(f"ERROR: No 200 response for spi3 {year_value}-{month_value:02d}. Stopping.")
       sys.exit(1)
 
