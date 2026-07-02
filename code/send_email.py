@@ -27,6 +27,10 @@ def fetch_with_retry(url, params=None, retries=3, wait=10):
         except requests.exceptions.RequestException:
             raise
 
+def escape_commas(value):
+    """Escape unescaped commas so the API doesn't treat them as delimiters."""
+    return re.sub(r'(?<!\\),', r'\\,', value)
+
 def get_ordinal(n):
     if 11 <= n <= 13:
         return f"{n}th"
@@ -454,6 +458,11 @@ if __name__ == "__main__":
                     "island": island,
                     "name": name,
                 }
+                api_params = {
+                    **query_params,
+                    "island": escape_commas(island),
+                    "name": escape_commas(name),
+                }
 
                 location_report = {
                     "query": query_params,
@@ -464,7 +473,7 @@ if __name__ == "__main__":
 
                 for source in DATA_SOURCES:
                     try:
-                        stats_res = fetch_with_retry(source["url"], params=query_params)
+                        stats_res = fetch_with_retry(source["url"], params=api_params)
                         data_payload = stats_res.json()
                         data_list = data_payload if isinstance(data_payload, list) else data_payload.get("data", [])
                         if not data_list:
