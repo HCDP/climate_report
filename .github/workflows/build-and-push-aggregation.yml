@@ -4,14 +4,18 @@ on:
   push:
     branches:
     - "main"
+    paths:
+    - "**/aggregation/**"
   workflow_dispatch:
 jobs:
   climate-report:
     runs-on: ubuntu-latest
     steps:
+    - name: Get Runner Public IP
+      run: curl -4 https://ifconfig.me
     - uses: actions/checkout@v4
     - name: Set container name
-      run: echo "CONTAINER_NAME=task-climate-report" >> $GITHUB_ENV
+      run: echo "CONTAINER_NAME=task-climate-report-aggregation" >> $GITHUB_ENV
     - name: Get date and hash
       run: echo "TAG=$(date --iso-8601)-$(git rev-parse --short HEAD)" >> $GITHUB_ENV
     - name: Log in to the container registry

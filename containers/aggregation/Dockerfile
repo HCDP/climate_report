@@ -11,11 +11,12 @@ RUN python3 -m pip install rasterio
 RUN python3 -m pip install numpy
 RUN python3 -m pip install pandas
 RUN python3 -m pip install geopandas
-RUN python3 -m pip install rasterio
 RUN python3 -m pip install rasterstats
 RUN python3 -m pip install python-dateutil
 RUN python3 -m pip install pytz
-RUN python3 -m pip install matplotlib
+RUN python3 -m pip install dateutil
+RUN python3 -m pip install urllib3
+
 
 
 RUN mkdir -p /workspace
@@ -36,12 +37,11 @@ RUN wget https://raw.githubusercontent.com/ikewai/data-uploader/main/upload.py -
 ADD /tools /sync
 ADD /envs/prod.env /workspace/envs
 
-ADD /code /workspace/code
+ADD /code/aggregation /workspace/code
 # Get the container's upload config as specified in the code repo.
-ADD /containers/configs/upload.json /sync/config.json
+ADD /containers/aggregation/configs/upload.json /sync/config.json
 # Add the task wrapper script.
-ADD /containers/task.sh /workspace/task.sh
+ADD /containers/aggregation/task.sh /workspace/task.sh
 
 WORKDIR /workspace
-# This container is intended to run the task wrapper at launch, unless otherwise specified at run-time.
 CMD [ "/bin/bash", "task.sh" ]

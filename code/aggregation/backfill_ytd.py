@@ -28,7 +28,7 @@ from rasterstats import zonal_stats
 
 # Reuse YTD generation logic from get_maps
 sys.path.insert(0, os.path.dirname(__file__))
-from get_maps import make_ytd_rainfall
+from code.aggregation.get_maps import make_ytd_rainfall
 
 RF_SOURCE_DIR = "/Users/cherryleheu/Documents/HCDP/Data/rf_all/monthly"
 

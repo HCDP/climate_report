@@ -1,6 +1,6 @@
 import os
 import sys
-from matplotlib.dates import relativedelta
+from dateutil.relativedelta import relativedelta
 import numpy as np
 import pytz
 import rasterio

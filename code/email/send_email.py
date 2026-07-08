@@ -1,40 +1,31 @@
 import datetime
 import re
-import argparse
-import time
-import requests
 import os
+import urllib3
+from urllib3.util import Retry
 
-token = os.getenv("HCDP_API_TOKEN")
+##########################################################################################
+#################################### Global Variables ####################################
+##########################################################################################
 
-headers = {
-    "Authorization": f"Bearer {token}"
+HCDP_API_TOKEN = os.getenv("HCDP_API_TOKEN")
+API_HEADERS = {
+    "Authorization": f"Bearer {HCDP_API_TOKEN}"
 }
+SUBSCRIPTIONS_URL = "https://api.hcdp.ikewai.org/mesonet/climate_report/subscriptions"
+API_BASE = "https://api.hcdp.ikewai.org"
+DIVISION_TYPES = ["island", "moku", "climate", "ahupuaa", "watershed"]
+RETRY_CONFIG = Retry(
+    total = 3, 
+    backoff_factor = 2,
+    status_forcelist = [408, 425, 429, 500, 502, 503, 504],
+    allowed_methods = ["GET", "POST"],
+    raise_on_status = True
+)
 
-def fetch_with_retry(url, params=None, retries=3, wait=10):
-    """GET with retry on timeout. Raises on final failure."""
-    for attempt in range(1, retries + 1):
-        try:
-            res = requests.get(url, params=params, headers=headers, timeout=30)
-            res.raise_for_status()
-            return res
-        except requests.exceptions.Timeout:
-            if attempt < retries:
-                print(f"  Timeout on attempt {attempt}/{retries} — retrying in {wait}s...")
-                time.sleep(wait)
-            else:
-                raise
-        except requests.exceptions.RequestException:
-            raise
-
-def escape_commas(value):
-    """Escape unescaped commas so the API doesn't treat them as delimiters."""
-    return re.sub(r'(?<!\\),', r'\\,', value)
-
-def get_ordinal(n):
-    if 11 <= n <= 13:
-        return f"{n}th"
-    return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+##########################################################################################
+################################## Scentence Generators ##################################
+##########################################################################################
 
 def generate_rainfall_sentence(data_list, location_name, total_years):
   if not data_list:
@@ -178,7 +169,27 @@ def generate_drought_sentence(data_list, location_name):
 
     return sentence
 
-SUBSCRIPTIONS_URL = "https://api.hcdp.ikewai.org/mesonet/climate_report/subscriptions"
+
+def generate_statewide_sentences(target_date: str):
+    statewide_params = {"date": target_date, "division_type": "Statewide"}
+    statewide_sentences = {}
+    print("Fetching statewide summaries...")
+    for source in DATA_SOURCES:
+        try:
+            res = fetch_with_retry(source["url"], params=statewide_params)
+            data_payload = res.json()
+            data_list = data_payload if isinstance(data_payload, list) else data_payload.get("data", [])
+            if not data_list:
+                print(f"  [{source['key']}] WARNING: No statewide data returned.")
+                return None
+            else:
+                statewide_sentences[source["key"]] = call_sentence_fn(source, data_list, "Hawaiʻi")
+                print(f"  [{source['key']}] {statewide_sentences[source['key']]}")
+        except Exception as e:
+            print(f"  [{source['key']}] ERROR fetching statewide data: {e}")
+            return None
+    return statewide_sentences
+
 
 DATA_SOURCES = [
     {
@@ -205,6 +216,80 @@ DATA_SOURCES = [
 ]
 
 LABELS = {s["key"]: s["label"] for s in DATA_SOURCES}
+
+
+
+##########################################################################################
+####################################### API Helpers ######################################
+##########################################################################################
+
+def get_configured_ids():
+    ep = "/mesonet/climate_report/configuration"
+    url = f"{API_BASE}{ep}"
+    res = fetch_with_retry(url, suppress_status = (404,))
+    if res.status == 404:
+        raise Exception(f"Workflow has not been configured for this month. No emails will be sent.")
+    ids = res.json()["ids"]
+    return ids
+
+def get_subscriber_data(subscriber_id: str):
+    ep = f"/mesonet/climate_report/subscription/{subscriber_id}"
+    url = f"{API_BASE}{ep}"
+    # possible for user to unsubscribe after registration and before email sent, so ignore 404s
+    res = fetch_with_retry(url, suppress_status = (404,))
+    if res.status == 404:
+        return None
+    return res.json()
+
+
+def send_email(subscriber_email: str, subscriber_id: str, text_content: str, html_content: str):
+    body = {"text": text_content, "html": html_content}
+    ep = f"/mesonet/climate_report/subscription/{subscriber_id}/email"
+    url = f"{API_BASE}{ep}"
+
+    try:
+        res = fetch_with_retry(url, body = body, method = "POST", suppress_status = (404,))
+        # ignore if user was not found
+        if res.status != 404:
+            print(f"Success! Email sent to {subscriber_email} (ID: {subscriber_id})")
+    except Exception as e:
+        print(f"Failed to send email to {subscriber_email} ({subscriber_id}): {e}")
+    
+
+
+def fetch_with_retry(url, params = None, body = None, method = "GET", suppress_status = ()):
+    res = urllib3.request(
+        method,
+        url,
+        fields = params,
+        json = body,
+        retries = RETRY_CONFIG,
+        headers = API_HEADERS
+    )
+    status = res.status
+    if status > 299 and status not in suppress_status:
+        raise Exception(f"Request failed with status {status}")
+    return res
+    
+
+
+
+    
+
+##########################################################################################
+########################################## Util ##########################################
+##########################################################################################
+
+def escape_commas(value):
+    """Escape unescaped commas so the API doesn't treat them as delimiters."""
+    return re.sub(r'(?<!\\),', r'\\,', value)
+
+def get_ordinal(n):
+    if 11 <= n <= 13:
+        return f"{n}th"
+    return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
 
 # 2. Helper function to get "last month" in YYYY-MM format
 def get_last_month_str():
@@ -261,9 +346,14 @@ def display_island(island):
 def display_div_type(div_type):
     return {"ahupuaa": "Ahupuaʻa"}.get(div_type, div_type.capitalize())
 
-def build_email_content(user_data, target_date=None):
-    statewide = user_data.get("statewide", {})
-    reports = user_data.get("reports", [])
+
+
+#########################################################################################
+################################### Report Generation ###################################
+#########################################################################################
+
+
+def build_email_content(statewide, reports, target_date = None):
     island_groups = group_by_island(reports)
 
     # --- Plain text ---
@@ -360,19 +450,81 @@ def build_email_content(user_data, target_date=None):
     return text, html
 
 
-if __name__ == "__main__":
-    arg_parser = argparse.ArgumentParser(description="Send monthly climate report emails.")
-    arg_parser.add_argument("--email", type=str, nargs="+", default=None, help="If provided, only send to these addresses.")
-    args = arg_parser.parse_args()
-    TARGET_EMAILS = args.email
-    if TARGET_EMAILS is None:
-        email_env = os.getenv("TARGET_EMAILS")
-        if email_env is not None:
-            email_env = set([value.strip() for value in email_env.split(",")])
-        TARGET_EMAILS = email_env
-    else:
-        TARGET_EMAILS = set(TARGET_EMAILS)
+def generate_reports(statewide_sentences, subscriber_data, target_date): 
+    all_data_ok = True
+    reports = []
 
+    for div_type in DIVISION_TYPES:
+        locations = subscriber_data.get(div_type, [])
+
+        for loc in locations:
+            if "::" in loc:
+                island, name = loc.split("::", 1)
+            else:
+                island = loc
+                name = loc
+
+            print(f"  -> {div_type.upper()} | Island: {island} | Name: {name}")
+
+            if island == "Statewide":
+                for key, sentence in statewide_sentences.items():
+                    print(f"     [{key}] {sentence}")
+                continue
+
+            query_params = {
+                "date": target_date,
+                "division_type": div_type,
+                "island": island,
+                "name": name,
+            }
+            api_params = {
+                **query_params,
+                "island": escape_commas(island),
+                "name": escape_commas(name),
+            }
+
+            location_report = {
+                "query": query_params,
+                "rainfall": None,
+                "temperature": None,
+                "drought": None,
+            }
+
+            for source in DATA_SOURCES:
+                try:
+                    stats_res = fetch_with_retry(source["url"], params=api_params)
+                    data_payload = stats_res.json()
+                    data_list = data_payload if isinstance(data_payload, list) else data_payload.get("data", [])
+                    if not data_list:
+                        print(f"     [{source['key']}] No data returned for {name}")
+                        all_data_ok = False
+                    summary = call_sentence_fn(source, data_list, name)
+                    print(f"     [{source['key']}] {summary}")
+                    location_report[source["key"]] = {
+                        "status": "success",
+                        "summary_sentence": summary,
+                        "data": data_payload,
+                    }
+                except Exception as e:
+                    print(f"     [{source['key']}] ERROR: {e}")
+                    all_data_ok = False
+                    location_report[source["key"]] = {
+                        "status": "error",
+                        "summary_sentence": call_sentence_fn(source, [], name),
+                        "error_message": str(e),
+                    }
+
+            reports.append(location_report)
+    return reports, all_data_ok
+
+
+##########################################################################################
+########################################## Main ##########################################
+##########################################################################################
+
+
+
+def main():
     target_date = get_last_month_str()
     target_year = int(target_date.split("-")[0])
     print(f"Querying data for target date: {target_date}\n" + "=" * 50)
@@ -382,144 +534,39 @@ if __name__ == "__main__":
         if source["start_year"] is not None:
             source["total_years"] = target_year - source["start_year"] + 1
 
-    # 3. Fetch statewide sentences once
-    statewide_params = {"date": target_date, "division_type": "Statewide"}
-    statewide_sentences = {}
-    statewide_ok = True
-    print("Fetching statewide summaries...")
-    for source in DATA_SOURCES:
-        try:
-            res = fetch_with_retry(source["url"], params=statewide_params)
-            data_payload = res.json()
-            data_list = data_payload if isinstance(data_payload, list) else data_payload.get("data", [])
-            if not data_list:
-                print(f"  [{source['key']}] WARNING: No statewide data returned.")
-                statewide_ok = False
-                statewide_sentences[source["key"]] = None
-            else:
-                statewide_sentences[source["key"]] = call_sentence_fn(source, data_list, "Hawaiʻi")
-                print(f"  [{source['key']}] {statewide_sentences[source['key']]}")
-        except requests.exceptions.RequestException as e:
-            print(f"  [{source['key']}] ERROR fetching statewide data: {e}")
-            statewide_ok = False
-            statewide_sentences[source["key"]] = None
+    statewide_sentences = generate_statewide_sentences(target_date)
 
-    if not statewide_ok:
-        print("WARNING: Some statewide data is missing. Emails will be skipped.")
+    # throw error if statewide not ok, no reason to generate email data since emails will not be sent
+    if statewide_sentences is None:
+        raise Exception("Some statewide data is missing. No emails have been sent.")
 
-    # 4. Fetch subscriptions
-    print("\nFetching subscriptions...")
-    res = fetch_with_retry(SUBSCRIPTIONS_URL)
-    subscriptions = res.json()
-
-    # Islands first, then finer divisions
-    division_types = ["island", "moku", "climate", "ahupuaa", "watershed"]
-    user_reports = {}
-
-    # 5. Build a personalized report for each subscriber
-    for user in subscriptions:
-        user_id = user.get("id")
-        user_email = user.get("email")
-
-        if TARGET_EMAILS and user_email not in TARGET_EMAILS:
-            print(f"\nSkipping {user_email} — not in target addresses.")
+    print(f"Retreiving subscriber IDs configured for last month...")
+    # get subscribers configured for this workflow
+    ids = get_configured_ids()
+    print(f"Found {ids.length} subscribers, generating emails...")
+    for subscriber_id in ids:
+        print(f"Retreiving subscriber data for id {subscriber_id}")
+        # get subscriber data
+        subscriber_data = get_subscriber_data(subscriber_id)
+        # if subscriber data was not found just ignore and continue
+        if subscriber_data is None:
             continue
-
-        print(f"\nProcessing User: {user_email} (ID: {user_id})")
+        subscriber_email = subscriber_data["email"]
+        print(f"\nProcessing User: {subscriber_email} (ID: {subscriber_id})")
         print("-" * 50)
-
-        user_reports[user_id] = {
-            "email": user_email,
-            "statewide": statewide_sentences,
-            "reports": [],
-            "all_data_ok": True,
-        }
-
-        for div_type in division_types:
-            locations = user.get(div_type, [])
-
-            for loc in locations:
-                if "::" in loc:
-                    island, name = loc.split("::", 1)
-                else:
-                    island = loc
-                    name = loc
-
-                print(f"  -> {div_type.upper()} | Island: {island} | Name: {name}")
-
-                if island == "Statewide":
-                    for key, sentence in statewide_sentences.items():
-                        print(f"     [{key}] {sentence}")
-                    continue
-
-                query_params = {
-                    "date": target_date,
-                    "division_type": div_type,
-                    "island": island,
-                    "name": name,
-                }
-                api_params = {
-                    **query_params,
-                    "island": escape_commas(island),
-                    "name": escape_commas(name),
-                }
-
-                location_report = {
-                    "query": query_params,
-                    "rainfall": None,
-                    "temperature": None,
-                    "drought": None,
-                }
-
-                for source in DATA_SOURCES:
-                    try:
-                        stats_res = fetch_with_retry(source["url"], params=api_params)
-                        data_payload = stats_res.json()
-                        data_list = data_payload if isinstance(data_payload, list) else data_payload.get("data", [])
-                        if not data_list:
-                            print(f"     [{source['key']}] No data returned for {name}")
-                            user_reports[user_id]["all_data_ok"] = False
-                        summary = call_sentence_fn(source, data_list, name)
-                        print(f"     [{source['key']}] {summary}")
-                        location_report[source["key"]] = {
-                            "status": "success",
-                            "summary_sentence": summary,
-                            "data": data_payload,
-                        }
-                    except requests.exceptions.RequestException as e:
-                        print(f"     [{source['key']}] ERROR: {e}")
-                        user_reports[user_id]["all_data_ok"] = False
-                        location_report[source["key"]] = {
-                            "status": "error",
-                            "summary_sentence": call_sentence_fn(source, [], name),
-                            "error_message": str(e),
-                        }
-
-                user_reports[user_id]["reports"].append(location_report)
-
-    # 6. Send a personalized email to each subscriber
-    print("\n" + "=" * 50)
-    if TARGET_EMAILS is not None:
-        print(f"Sending emails... (target override: {', '.join(TARGET_EMAILS)})")
-    else:
-        print("Sending emails to all subscribers...")
-    for user_id, user_data in user_reports.items():
-        email = user_data.get("email")
-        if TARGET_EMAILS and email not in TARGET_EMAILS:
-            print(f"Skipping {email} — not in target addresses.")
+        
+        reports, all_data_ok = generate_reports(statewide_sentences, subscriber_data, target_date)
+        # if all data not ok print warning and skip user
+        if not all_data_ok:
+            print(f"Skipping email to {subscriber_email} — one or more locations returned no data.")
             continue
-        if not statewide_ok:
-            print(f"Skipping email to {email} — statewide data was not available.")
-            continue
-        if not user_data.get("all_data_ok", True):
-            print(f"Skipping email to {email} — one or more locations returned no data.")
-            continue
-        text_content, html_content = build_email_content(user_data, target_date)
-        body = {"text": text_content, "html": html_content}
-        url = f"https://api.hcdp.ikewai.org/mesonet/climate_report/subscription/{user_id}/email"
-        try:
-            res = requests.post(url, json=body, headers=headers)
-            res.raise_for_status()
-            print(f"Success! Email sent to {email} (ID: {user_id})")
-        except requests.exceptions.RequestException as e:
-            print(f"Failed to send email to {email} ({user_id}): {e}")
+        # send email
+        text_content, html_content = build_email_content(statewide_sentences, reports, target_date)
+        send_email(subscriber_email, subscriber_id, text_content, html_content)
+        
+
+
+if __name__ == "__main__":
+    main()
+
+    
