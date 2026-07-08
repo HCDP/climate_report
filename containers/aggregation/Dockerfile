@@ -21,7 +21,7 @@ RUN python3 -m pip install \
 
 RUN mkdir -p /workspace
 WORKDIR /workspace
-RUN wget -4 -nv https://api.hcdp.ikewai.org/files/download/workflow_data/climate_report/dependencies.tar.gz
+RUN wget -4 -nv --connect-timeout=5 --tries=3 https://api.hcdp.ikewai.org/files/download/workflow_data/climate_report/dependencies.tar.gz
 RUN tar -xf dependencies.tar.gz
 RUN rm dependencies.tar.gz
 
