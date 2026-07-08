@@ -7,15 +7,15 @@ RUN apt install gdal-bin libgdal-dev -y
 
 RUN pip install --upgrade pip
 
-RUN python3 -m pip install rasterio
-RUN python3 -m pip install numpy
-RUN python3 -m pip install pandas
-RUN python3 -m pip install geopandas
-RUN python3 -m pip install rasterstats
-RUN python3 -m pip install python-dateutil
-RUN python3 -m pip install pytz
-RUN python3 -m pip install dateutil
-RUN python3 -m pip install urllib3
+RUN python3 -m pip install \
+    rasterio \
+    numpy \
+    pandas \
+    geopandas \
+    rasterstats \
+    python-dateutil \
+    pytz \
+    urllib3
 
 
 
