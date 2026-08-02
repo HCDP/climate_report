@@ -15,7 +15,7 @@ RUN python3 -m pip install \
     rasterstats \
     python-dateutil \
     pytz \
-    urllib3
+    "urllib3>=2.0.0"
 
 
 
