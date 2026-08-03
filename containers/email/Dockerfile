@@ -5,7 +5,7 @@ LABEL org.opencontainers.image.description="Base image for climate report workfl
 RUN apt update
 
 RUN pip install --upgrade pip
-RUN python3 -m pip install urllib3
+RUN python3 -m pip install "urllib3>=2.0.0"
 
 
 RUN mkdir -p /workspace/code
