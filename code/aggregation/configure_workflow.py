@@ -50,8 +50,14 @@ def configure_workflow():
     retries = retry_config,
     headers = headers
   )
+  
+  if res.status != 200:
+    raise Exception(f"Configuration check request failed with status {res.status}: {res.data.decode('utf-8')}")
+
   is_configured = res.json()["configured"]
-  if not is_configured:
+  if is_configured:
+    print("Workflow already configured. Skipping configuration...")
+  else:
     res = urllib3.request(
       "POST",
       url,
