@@ -211,7 +211,7 @@ DATA_SOURCES = [
         "url": "https://api.hcdp.ikewai.org/mesonet/climate_report/drought_stats",
         "sentence_fn": generate_drought_sentence,
         "start_year": None,
-        "label": "Drought",
+        "label": "Drought (3-month)",
     },
 ]
 
