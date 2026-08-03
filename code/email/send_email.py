@@ -543,7 +543,7 @@ def main():
     print(f"Retreiving subscriber IDs configured for last month...")
     # get subscribers configured for this workflow
     ids = get_configured_ids()
-    print(f"Found {ids.length} subscribers, generating emails...")
+    print(f"Found {len(ids)} subscribers, generating emails...")
     for subscriber_id in ids:
         print(f"Retreiving subscriber data for id {subscriber_id}")
         # get subscriber data
