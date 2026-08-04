@@ -246,14 +246,31 @@ def send_email(subscriber_email: str, subscriber_id: str, text_content: str, htm
     body = {"text": text_content, "html": html_content}
     ep = f"/mesonet/climate_report/subscription/{subscriber_id}/email"
     url = f"{API_BASE}{ep}"
-
+    success = True
     try:
         res = fetch_with_retry(url, body = body, method = "POST", suppress_status = (404,))
         # ignore if user was not found
         if res.status != 404:
-            print(f"Success! Email sent to {subscriber_email} (ID: {subscriber_id})")
+            print(f"Success! Email sent to {subscriber_email} ({subscriber_id})")
     except Exception as e:
         print(f"Failed to send email to {subscriber_email} ({subscriber_id}): {e}")
+        success = False
+    return success
+        
+
+def skip_user(subscriber_email: str, subscriber_id: str):
+    ep = f"/mesonet/climate_report/configuration/{subscriber_id}"
+    url = f"{API_BASE}{ep}"
+    success = True
+    try:
+        res = fetch_with_retry(url, method = "DELETE", suppress_status = (404,))
+        # ignore if user was not found
+        if res.status != 404:
+            print(f"User {subscriber_email} ({subscriber_id}) was successfully removed from monthly config")
+    except Exception as e:
+        print(f"Failed to remove user {subscriber_email} ({subscriber_id}): {e}")
+        success = False
+    return success
     
 
 
@@ -544,12 +561,15 @@ def main():
     # get subscribers configured for this workflow
     ids = get_configured_ids()
     print(f"Found {len(ids)} subscribers, generating emails...")
+    failed = []
     for subscriber_id in ids:
         print(f"Retreiving subscriber data for id {subscriber_id}")
         # get subscriber data
         subscriber_data = get_subscriber_data(subscriber_id)
-        # if subscriber data was not found just ignore and continue
+        # if subscriber data was not found print warning and skip user
         if subscriber_data is None:
+            print(f"Skipping user ID {subscriber_id}, no subscriber data was found.")
+            skip_user("Unknown", subscriber_id)
             continue
         subscriber_email = subscriber_data["email"]
         print(f"\nProcessing User: {subscriber_email} (ID: {subscriber_id})")
@@ -558,12 +578,20 @@ def main():
         reports, all_data_ok = generate_reports(statewide_sentences, subscriber_data, target_date)
         # if all data not ok print warning and skip user
         if not all_data_ok:
-            print(f"Skipping email to {subscriber_email} — one or more locations returned no data.")
+            print(f"Skipping email to {subscriber_email}, one or more locations returned no data.")
+            skip_user(subscriber_email, subscriber_id)
             continue
         # send email
         text_content, html_content = build_email_content(statewide_sentences, reports, target_date)
-        send_email(subscriber_email, subscriber_id, text_content, html_content)
-        
+        success = send_email(subscriber_email, subscriber_id, text_content, html_content)
+        if not success:
+            failed.append((subscriber_email, subscriber_id));
+    if len(failed) > 0:
+        print(f"{len(failed)} failures occurred during the email process:")
+        for email, id in failed:
+            print(f"Email: {email}, ID: {id}")
+        # throw an error so the email workflow displays the failure
+        raise Exception("Failures occurred during the email process.")
 
 
 if __name__ == "__main__":
